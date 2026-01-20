@@ -4,9 +4,10 @@ from urllib.parse import quote_plus
 from database import Base
 import os
 import logging
+from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
-
+load_dotenv()
 MYSQL_USER = os.getenv("MYSQL_USER", "root")
 MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD", "")
 MYSQL_HOST = os.getenv("MYSQL_HOST", "localhost")
@@ -23,8 +24,7 @@ engine = create_async_engine(
     pool_pre_ping=True,
     pool_recycle=3600,
     pool_size=10,
-    max_overflow=20,
-    poolclass=QueuePool,
+    max_overflow=20
 )
 
 AsyncSessionLocal = async_sessionmaker(

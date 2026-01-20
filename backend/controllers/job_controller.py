@@ -1,4 +1,4 @@
-from fastapi89 import UploadFile, HTTPException
+from fastapi import UploadFile, HTTPException
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Dict, Any, List
