@@ -7,9 +7,12 @@ import uuid
 import csv
 import re
 from pathlib import Path
+import logging
 
 from database import Job, JobError, JobStatus, Customer
 from db_session import AsyncSessionLocal
+
+logger = logging.getLogger(__name__)
 
 class JobService:
     @staticmethod
@@ -191,12 +194,14 @@ class JobService:
     async def process_job_async(file_path: str, job_id: str):
         async with AsyncSessionLocal() as db:
             try:
+                logger.info(f"Starting file processing for job {job_id}, file: {file_path}")
                 await JobService.update_job_status(
                     db, job_id, JobStatus.PROCESSING
                 )
                 file_path_obj = Path(file_path)
                 if not file_path_obj.exists():
                     raise FileNotFoundError(f"File not found: {file_path}")
+                logger.debug(f"File found: {file_path}, starting CSV parsing")
                 total_rows = 0
                 processed_rows = 0
                 success_count = 0
@@ -206,7 +211,10 @@ class JobService:
                     required_columns = {'name', 'email', 'phone', 'company'}
                     if not required_columns.issubset(set(reader.fieldnames or [])):
                         missing = required_columns - set(reader.fieldnames or [])
-                        raise ValueError(f"CSV file is missing required columns: {', '.join(missing)}")
+                        error_msg = f"CSV file is missing required columns: {', '.join(missing)}"
+                        logger.error(f"Job {job_id}: {error_msg}")
+                        raise ValueError(error_msg)
+                    logger.debug(f"CSV columns validated: {reader.fieldnames}")
                     for row_number, row in enumerate(reader, start=2):
                         total_rows += 1
                         processed_rows += 1
@@ -246,11 +254,13 @@ class JobService:
                 await JobService.update_job_status(
                     db, job_id, JobStatus.COMPLETED, datetime.now()
                 )
-                print(f"File {file_path} processed successfully for job {job_id}. "
-                      f"Total: {total_rows}, Success: {success_count}, Failed: {failed_count}")
+                logger.info(
+                    f"File {file_path} processed successfully for job {job_id}. "
+                    f"Total: {total_rows}, Success: {success_count}, Failed: {failed_count}"
+                )
             except Exception as e:
                 await JobService.update_job_status(
                     db, job_id, JobStatus.FAILED, datetime.now()
                 )
                 await JobService.add_job_error(db, job_id, str(e))
-                print(f"Error processing file for job {job_id}: {e}")
+                logger.error(f"Error processing file for job {job_id}: {e}", exc_info=True)
