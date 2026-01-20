@@ -49,10 +49,15 @@ class JobController:
                 file=file,
                 job_id=job._id
             )
-            asyncio.create_task(
-                JobService.process_job_async(str(file_path), job._id)
-            )
-            logger.info(f"File uploaded successfully: {file.filename} (job_id: {job._id})")
+            
+            async def process_with_error_handling():
+                try:
+                    await JobService.process_job_async(str(file_path), job._id)
+                except Exception as e:
+                    logger.error(f"Unhandled error in background task for job {job._id}: {e}", exc_info=True)
+            
+            asyncio.create_task(process_with_error_handling())
+            logger.info(f"File uploaded successfully: {file.filename} (job_id: {job._id}), background task started")
             return JSONResponse(
                 status_code=200,
                 content={
