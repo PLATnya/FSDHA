@@ -6,6 +6,7 @@ import logging
 
 from services.customer_service import CustomerService
 from database import Customer
+from exceptions import DatabaseError
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +42,4 @@ class CustomerController:
                 }
             )
         except Exception as e:
-            logger.error(f"Error retrieving customers: {e}", exc_info=True)
-            raise HTTPException(
-                status_code=500,
-                detail=f"Error retrieving customers: {str(e)}"
-            )
+            raise DatabaseError(f"Failed to retrieve customers: {str(e)}")

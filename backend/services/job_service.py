@@ -13,6 +13,7 @@ import asyncio
 from database import Job, JobError, JobStatus, Customer
 from db_session import AsyncSessionLocal
 from services.job_progress_hub import job_progress_hub
+from exceptions import JobValidationError, FileUploadError
 
 logger = logging.getLogger(__name__)
 
@@ -235,7 +236,7 @@ class JobService:
                 )
                 file_path_obj = Path(file_path)
                 if not file_path_obj.exists():
-                    raise FileNotFoundError(f"File not found: {file_path}")
+                    raise FileUploadError(f"File not found: {file_path}")
                 logger.debug(f"File found: {file_path}, starting CSV parsing")
                 processed_rows = 0
                 success_count = 0
@@ -249,7 +250,7 @@ class JobService:
                         missing = required_columns - set(reader.fieldnames or [])
                         error_msg = f"CSV file is missing required columns: {', '.join(missing)}"
                         logger.error(f"Job {job_id}: {error_msg}")
-                        raise ValueError(error_msg)
+                        raise JobValidationError(f"CSV file is missing required columns: {', '.join(missing)}")
                     for _ in reader:
                         total_rows += 1
 

@@ -10,6 +10,7 @@ import io
 from services.job_service import JobService
 from services.file_service import FileService
 from database import Job
+from exceptions import JobNotFoundError, FileUploadError, DatabaseError
 
 logger = logging.getLogger(__name__)
 
@@ -61,10 +62,7 @@ class JobController:
         db: AsyncSession
     ) -> JSONResponse:
         if not file.filename:
-            raise HTTPException(
-                status_code=400,
-                detail="Filename is required"
-            )
+            raise FileUploadError("Filename is required")
         try:
             job = await JobService.create_job(
                 db=db,
@@ -100,11 +98,7 @@ class JobController:
             raise
         except Exception as e:
             await db.rollback()
-            logger.error(f"Error uploading file {file.filename}: {e}", exc_info=True)
-            raise HTTPException(
-                status_code=500,
-                detail=f"Error uploading file: {str(e)}"
-            )
+            raise FileUploadError(f"Failed to upload file: {str(e)}")
 
     async def list_jobs(
         self,
@@ -127,11 +121,7 @@ class JobController:
                 }
             )
         except Exception as e:
-            logger.error(f"Error retrieving jobs: {e}", exc_info=True)
-            raise HTTPException(
-                status_code=500,
-                detail=f"Error retrieving jobs: {str(e)}"
-            )
+            raise DatabaseError(f"Failed to retrieve jobs: {str(e)}")
 
     async def reset_all_data(self, db: AsyncSession) -> JSONResponse:
         try:
@@ -146,8 +136,7 @@ class JobController:
                 }
             )
         except Exception as e:
-            logger.error(f"Error resetting all data: {e}", exc_info=True)
-            raise HTTPException(status_code=500, detail=f"Error resetting all data: {str(e)}")
+            raise DatabaseError(f"Failed to reset all data: {str(e)}")
 
     async def get_job(
         self,
@@ -157,7 +146,7 @@ class JobController:
         try:
             job = await JobService.get_job_by_id(db, job_id)
             if not job:
-                raise HTTPException(status_code=404, detail="Job not found")
+                raise JobNotFoundError(job_id)
             error_messages = await JobService.get_job_errors(db, job._id)
             return JSONResponse(
                 status_code=200,
@@ -166,11 +155,7 @@ class JobController:
         except HTTPException:
             raise
         except Exception as e:
-            logger.error(f"Error retrieving job {job_id}: {e}", exc_info=True)
-            raise HTTPException(
-                status_code=500,
-                detail=f"Error retrieving job: {str(e)}"
-            )
+            raise DatabaseError(f"Failed to retrieve job: {str(e)}")
 
     async def get_job_error_report(
         self,
@@ -179,7 +164,7 @@ class JobController:
     ) -> Response:
         job = await JobService.get_job_by_id(db, job_id)
         if not job:
-            raise HTTPException(status_code=404, detail="Job not found")
+            raise JobNotFoundError(job_id)
 
         error_rows = await JobService.get_error_rows(db, job_id)
 
@@ -228,8 +213,4 @@ class JobController:
                 content=self._serialize_job(last_job, error_messages)
             )
         except Exception as e:
-            logger.error(f"Error retrieving last job ID: {e}", exc_info=True)
-            raise HTTPException(
-                status_code=500,
-                detail=f"Error retrieving last job ID: {str(e)}"
-            )
+            raise DatabaseError(f"Failed to retrieve last job ID: {str(e)}")
