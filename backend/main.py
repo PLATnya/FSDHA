@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
 import logging
 
@@ -12,6 +13,7 @@ from middleware.error_handler import (
     general_exception_handler,
     RequestIDMiddleware
 )
+from middleware.cors_config import get_allowed_origins
 
 from contextlib import asynccontextmanager
 
@@ -30,6 +32,16 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="File Upload Service", lifespan=lifespan)
+
+allowed_origins = get_allowed_origins()
+logger.info(f"CORS allowed origins: {allowed_origins}")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 app.add_middleware(RequestIDMiddleware)
 
