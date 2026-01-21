@@ -18,7 +18,7 @@ function App() {
   const [file, setFile] = useState<File | null>(null)
   const [isUploading, setIsUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [result, setResult] = useState<{ id: number; filename: string; status: string } | null>(null)
+  const [result, setResult] = useState<{ id: string; filename: string; status: string } | null>(null)
   const [jobsRefreshToken, setJobsRefreshToken] = useState(0)
 
   const fileLabel = useMemo(() => {
@@ -46,7 +46,7 @@ function App() {
         throw new Error(text || `Upload failed (${res.status})`)
       }
 
-      const json = (await res.json()) as { id: number; filename: string; status: string }
+      const json = (await res.json()) as { id: string; filename: string; status: string }
       setResult(json)
       setJobsRefreshToken((x) => x + 1)
     } catch (e) {
@@ -58,7 +58,7 @@ function App() {
 
   return (
     <Box sx={{ minHeight: '100%', py: 6 }}>
-      <Container maxWidth="md">
+      <Container maxWidth={false} sx={{ maxWidth: 1350 }}>
         <Stack spacing={3}>
           <Paper elevation={2} sx={{ p: 3 }}>
             <Stack spacing={2.5}>

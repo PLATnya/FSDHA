@@ -1,6 +1,10 @@
+import CheckCircleIcon from '@mui/icons-material/CheckCircle'
+import ErrorIcon from '@mui/icons-material/Error'
 import ExpandLessIcon from '@mui/icons-material/ExpandLess'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
+import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty'
 import RefreshIcon from '@mui/icons-material/Refresh'
+import SyncIcon from '@mui/icons-material/Sync'
 import {
   Alert,
   Box,
@@ -21,10 +25,11 @@ import {
 } from '@mui/material'
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 
-type JobStatus = string
+type KnownJobStatus = 'pending' | 'processing' | 'completed' | 'failed'
+type JobStatus = KnownJobStatus | string
 
 export type Job = {
-  id: number
+  id: string
   filename: string
   status: JobStatus
   totalRows?: number | null
@@ -41,13 +46,32 @@ type JobsResponse = {
   total: number
 }
 
-function statusChipColor(status: string): 'default' | 'warning' | 'info' | 'success' | 'error' {
-  const s = status.toLowerCase()
-  if (s.includes('fail') || s.includes('error')) return 'error'
-  if (s.includes('complete') || s.includes('done') || s.includes('success')) return 'success'
-  if (s.includes('process') || s.includes('running')) return 'info'
-  if (s.includes('queue') || s.includes('pending')) return 'warning'
-  return 'default'
+function normalizeStatus(status: string): KnownJobStatus | 'unknown' {
+  const s = status.toLowerCase().trim()
+  if (s === 'pending') return 'pending'
+  if (s === 'processing') return 'processing'
+  if (s === 'completed') return 'completed'
+  if (s === 'failed') return 'failed'
+  return 'unknown'
+}
+
+function statusBadge(status: string): {
+  label: string
+  color: 'default' | 'warning' | 'info' | 'success' | 'error'
+  icon?: React.ReactElement
+} {
+  switch (normalizeStatus(status)) {
+    case 'pending':
+      return { label: 'pending', color: 'warning', icon: <HourglassEmptyIcon fontSize="small" /> }
+    case 'processing':
+      return { label: 'processing', color: 'info', icon: <SyncIcon fontSize="small" /> }
+    case 'completed':
+      return { label: 'completed', color: 'success', icon: <CheckCircleIcon fontSize="small" /> }
+    case 'failed':
+      return { label: 'failed', color: 'error', icon: <ErrorIcon fontSize="small" /> }
+    default:
+      return { label: status || 'unknown', color: 'default' }
+  }
 }
 
 function progressPercent(job: Job): number | null {
@@ -57,13 +81,46 @@ function progressPercent(job: Job): number | null {
   return Math.max(0, Math.min(100, Math.round((processed / total) * 100)))
 }
 
+function progressUi(job: Job): {
+  variant: 'determinate' | 'indeterminate'
+  value: number
+  label: string
+} {
+  const status = normalizeStatus(job.status)
+  const pct = progressPercent(job)
+  const total = job.totalRows ?? null
+  const processed = job.processedRows ?? null
+
+  if (pct != null) {
+    return {
+      variant: 'determinate',
+      value: pct,
+      label: `${pct}% (${processed ?? 0}/${total ?? 0})`,
+    }
+  }
+
+  if (status === 'completed') {
+    return { variant: 'determinate', value: 100, label: '100%' }
+  }
+
+  if (status === 'pending') {
+    return { variant: 'determinate', value: 0, label: '0%' }
+  }
+
+  if (processed != null && total != null) {
+    return { variant: 'indeterminate', value: 0, label: `${processed}/${total}` }
+  }
+
+  return { variant: 'indeterminate', value: 0, label: '—' }
+}
+
 export function JobsList(props: { refreshToken?: number }) {
   const [jobs, setJobs] = useState<Job[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [open, setOpen] = useState<Record<number, boolean>>({})
+  const [open, setOpen] = useState<Record<string, boolean>>({})
 
-  const toggleOpen = useCallback((id: number) => {
+  const toggleOpen = useCallback((id: string) => {
     setOpen((prev) => ({ ...prev, [id]: !prev[id] }))
   }, [])
 
@@ -127,7 +184,6 @@ export function JobsList(props: { refreshToken?: number }) {
               <TableCell>Status</TableCell>
               <TableCell width="35%">Progress</TableCell>
               <TableCell>Counts</TableCell>
-              <TableCell>Errors</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
@@ -142,11 +198,15 @@ export function JobsList(props: { refreshToken?: number }) {
             ) : null}
 
             {rows.map((job) => {
-              const pct = progressPercent(job)
+              const p = progressUi(job)
               const isOpen = Boolean(open[job.id])
               const errors = job.errors ?? []
               const hasErrors = errors.length > 0
-              const isCompleted = job.status?.toLowerCase().includes('complete')
+              const status = normalizeStatus(job.status)
+              const isDone = status === 'completed' || status === 'failed'
+              const badge = statusBadge(job.status)
+              const idShort = job.id.length > 8 ? job.id.slice(0, 8) : job.id
+              const firstError = hasErrors ? errors[0] : null
 
               return (
                 <Fragment key={job.id}>
@@ -165,29 +225,31 @@ export function JobsList(props: { refreshToken?: number }) {
                         {job.filename}
                       </Typography>
                       <Typography variant="caption" color="text.secondary">
-                        Job #{job.id}
+                        Job #{idShort}
                       </Typography>
                     </TableCell>
                     <TableCell>
-                      <Chip size="small" label={job.status} color={statusChipColor(job.status)} />
+                      <Chip
+                        size="small"
+                        label={badge.label}
+                        color={badge.color}
+                        icon={badge.icon}
+                        variant="outlined"
+                      />
                     </TableCell>
                     <TableCell>
                       <Stack spacing={0.5}>
                         <LinearProgress
-                          variant={pct == null ? 'indeterminate' : 'determinate'}
-                          value={pct ?? 0}
+                          variant={p.variant}
+                          value={p.value}
                         />
                         <Typography variant="caption" color="text.secondary">
-                          {pct == null
-                            ? job.processedRows != null && job.totalRows != null
-                              ? `${job.processedRows}/${job.totalRows}`
-                              : '—'
-                            : `${pct}% (${job.processedRows ?? 0}/${job.totalRows ?? 0})`}
+                          {p.label}
                         </Typography>
                       </Stack>
                     </TableCell>
                     <TableCell>
-                      {isCompleted ? (
+                      {isDone ? (
                         <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
                           <Chip size="small" color="success" label={`Success: ${job.successCount ?? 0}`} />
                           <Chip size="small" color="error" label={`Failed: ${job.failedCount ?? 0}`} />
@@ -198,15 +260,7 @@ export function JobsList(props: { refreshToken?: number }) {
                         </Typography>
                       )}
                     </TableCell>
-                    <TableCell>
-                      {hasErrors ? (
-                        <Chip size="small" color="error" variant="outlined" label={`${errors.length} error(s)`} />
-                      ) : (
-                        <Typography variant="body2" color="text.secondary">
-                          None
-                        </Typography>
-                      )}
-                    </TableCell>
+                   
                   </TableRow>
                   <TableRow>
                     <TableCell style={{ paddingBottom: 0, paddingTop: 0 }} colSpan={6}>

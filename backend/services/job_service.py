@@ -202,21 +202,34 @@ class JobService:
                 if not file_path_obj.exists():
                     raise FileNotFoundError(f"File not found: {file_path}")
                 logger.debug(f"File found: {file_path}, starting CSV parsing")
-                total_rows = 0
                 processed_rows = 0
                 success_count = 0
                 failed_count = 0
+
+                total_rows = 0
+                required_columns = {'name', 'email', 'phone', 'company'}
                 with open(file_path_obj, 'r', encoding='utf-8') as csvfile:
                     reader = csv.DictReader(csvfile)
-                    required_columns = {'name', 'email', 'phone', 'company'}
                     if not required_columns.issubset(set(reader.fieldnames or [])):
                         missing = required_columns - set(reader.fieldnames or [])
                         error_msg = f"CSV file is missing required columns: {', '.join(missing)}"
                         logger.error(f"Job {job_id}: {error_msg}")
                         raise ValueError(error_msg)
+                    for _ in reader:
+                        total_rows += 1
+
+                await JobService.update_job_counts(
+                    db, job_id,
+                    total_rows=total_rows,
+                    processed_rows=0,
+                    success_count=0,
+                    failed_count=0
+                )
+
+                with open(file_path_obj, 'r', encoding='utf-8') as csvfile:
+                    reader = csv.DictReader(csvfile)
                     logger.debug(f"CSV columns validated: {reader.fieldnames}")
                     for row_number, row in enumerate(reader, start=2):
-                        total_rows += 1
                         processed_rows += 1
                         is_valid, validation_error = JobService.validate_row(row, row_number)
                         if not is_valid:
