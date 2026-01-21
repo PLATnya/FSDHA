@@ -104,6 +104,29 @@ class JobController:
                 detail=f"Error retrieving jobs: {str(e)}"
             )
 
+    async def get_job(
+        self,
+        job_id: str,
+        db: AsyncSession
+    ) -> JSONResponse:
+        try:
+            job = await JobService.get_job_by_id(db, job_id)
+            if not job:
+                raise HTTPException(status_code=404, detail="Job not found")
+            error_messages = await JobService.get_job_errors(db, job._id)
+            return JSONResponse(
+                status_code=200,
+                content=self._serialize_job(job, error_messages)
+            )
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error retrieving job {job_id}: {e}", exc_info=True)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error retrieving job: {str(e)}"
+            )
+
     async def get_last_job_id(
         self,
         db: AsyncSession
