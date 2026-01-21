@@ -1,5 +1,5 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, delete
 from sqlalchemy.exc import IntegrityError
 from typing import Optional, List, Dict, Tuple
 from datetime import datetime
@@ -8,6 +8,7 @@ import csv
 import re
 from pathlib import Path
 import logging
+import asyncio
 
 from database import Job, JobError, JobStatus, Customer
 from db_session import AsyncSessionLocal
@@ -271,9 +272,36 @@ class JobService:
                     f"File {file_path} processed successfully for job {job_id}. "
                     f"Total: {total_rows}, Success: {success_count}, Failed: {failed_count}"
                 )
+            except asyncio.CancelledError:
+                try:
+                    await JobService.update_job_status(
+                        db, job_id, JobStatus.FAILED, datetime.now()
+                    )
+                    await JobService.add_job_error(db, job_id, "Job cancelled")
+                except Exception:
+                    await db.rollback()
+                logger.warning(f"Job {job_id} processing cancelled")
+                raise
             except Exception as e:
                 await JobService.update_job_status(
                     db, job_id, JobStatus.FAILED, datetime.now()
                 )
                 await JobService.add_job_error(db, job_id, str(e))
                 logger.error(f"Error processing file for job {job_id}: {e}", exc_info=True)
+
+    @staticmethod
+    async def delete_all_job_data(db: AsyncSession) -> Dict[str, int]:
+
+        customers_res = await db.execute(delete(Customer))
+        errors_res = await db.execute(delete(JobError))
+        jobs_res = await db.execute(delete(Job))
+        await db.commit()
+
+        def rc(res) -> int:
+            return int(res.rowcount) if res.rowcount is not None else -1
+
+        return {
+            "customers_deleted": rc(customers_res),
+            "job_errors_deleted": rc(errors_res),
+            "jobs_deleted": rc(jobs_res),
+        }

@@ -15,6 +15,29 @@ logger = logging.getLogger(__name__)
 class JobController:
     def __init__(self, file_service: FileService):
         self.file_service = file_service
+        self._tasks: Dict[str, asyncio.Task] = {}
+
+    def _register_task(self, job_id: str, task: asyncio.Task) -> None:
+        self._tasks[job_id] = task
+
+        def _cleanup(_task: asyncio.Task) -> None:
+            self._tasks.pop(job_id, None)
+
+        task.add_done_callback(_cleanup)
+
+    async def _cancel_all_tasks(self, timeout_seconds: float = 5.0) -> int:
+        tasks = list(self._tasks.values())
+        if not tasks:
+            return 0
+        for t in tasks:
+            t.cancel()
+        try:
+            await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=timeout_seconds)
+        except asyncio.TimeoutError:
+            logger.warning("Timed out waiting for job tasks to cancel")
+        finally:
+            self._tasks.clear()
+        return len(tasks)
 
     def _serialize_job(self, job: Job, errors: List[str]) -> Dict[str, Any]:
         return {
@@ -50,13 +73,17 @@ class JobController:
                 job_id=job._id
             )
             
-            async def process_with_error_handling():
+            async def runner():
                 try:
                     await JobService.process_job_async(str(file_path), job._id)
+                except asyncio.CancelledError:
+                    logger.info(f"Background task cancelled for job {job._id}")
+                    raise
                 except Exception as e:
                     logger.error(f"Unhandled error in background task for job {job._id}: {e}", exc_info=True)
-            
-            asyncio.create_task(process_with_error_handling())
+
+            task = asyncio.create_task(runner(), name=f"process_job:{job._id}")
+            self._register_task(job._id, task)
             logger.info(f"File uploaded successfully: {file.filename} (job_id: {job._id}), background task started")
             return JSONResponse(
                 status_code=200,
@@ -103,6 +130,22 @@ class JobController:
                 status_code=500,
                 detail=f"Error retrieving jobs: {str(e)}"
             )
+
+    async def reset_all_data(self, db: AsyncSession) -> JSONResponse:
+        try:
+            cancelled = await self._cancel_all_tasks()
+            deleted = await JobService.delete_all_job_data(db)
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "message": "All job-related data deleted",
+                    "cancelled_tasks": cancelled,
+                    **deleted,
+                }
+            )
+        except Exception as e:
+            logger.error(f"Error resetting all data: {e}", exc_info=True)
+            raise HTTPException(status_code=500, detail=f"Error resetting all data: {str(e)}")
 
     async def get_job(
         self,

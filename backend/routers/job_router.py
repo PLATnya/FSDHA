@@ -27,6 +27,10 @@ async def upload_file(
 async def get_last_id(db: AsyncSession = Depends(get_db)):
     return await job_controller.get_last_job_id(db)
 
+@router.delete("/reset")
+async def reset_all_data(db: AsyncSession = Depends(get_db)):
+    return await job_controller.reset_all_data(db)
+
 @router.get("/{job_id}")
 async def get_job(job_id: str, db: AsyncSession = Depends(get_db)):
     return await job_controller.get_job(job_id, db)
