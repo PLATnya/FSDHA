@@ -23,7 +23,7 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material'
-import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 type KnownJobStatus = 'pending' | 'processing' | 'completed' | 'failed'
 type JobStatus = KnownJobStatus | string
@@ -45,6 +45,52 @@ type JobsResponse = {
   jobs: Job[]
   total: number
 }
+
+type JobWsEvent =
+  | {
+      type: 'snapshot'
+      jobId: string
+      filename?: string
+      status?: string
+      totalRows?: number | null
+      processedRows?: number | null
+      successCount?: number | null
+      failedCount?: number | null
+      createdAt?: string | null
+      completedAt?: string | null
+      ts?: string
+    }
+  | {
+      type: 'progress'
+      jobId: string
+      rowNumber?: number
+      rowOutcome?: 'success' | 'failed'
+      error?: string | null
+      totalRows?: number | null
+      processedRows?: number | null
+      successCount?: number | null
+      failedCount?: number | null
+      progress?: number
+      ts?: string
+    }
+  | {
+      type: 'status'
+      jobId: string
+      status: string
+      message?: string
+      totalRows?: number | null
+      processedRows?: number | null
+      successCount?: number | null
+      failedCount?: number | null
+      progress?: number
+      ts?: string
+    }
+  | {
+      type: 'error'
+      jobId: string
+      message: string
+      ts?: string
+    }
 
 function normalizeStatus(status: string): KnownJobStatus | 'unknown' {
   const s = status.toLowerCase().trim()
@@ -114,11 +160,39 @@ function progressUi(job: Job): {
   return { variant: 'indeterminate', value: 0, label: '—' }
 }
 
+function jobIsActive(job: Job): boolean {
+  const s = normalizeStatus(job.status)
+  return s !== 'completed' && s !== 'failed'
+}
+
+function toWsBaseUrl(originOrHttpUrl: string): string {
+  const trimmed = originOrHttpUrl.trim()
+  if (!trimmed) return ''
+  if (trimmed.startsWith('ws://') || trimmed.startsWith('wss://')) return trimmed.replace(/\/+$/, '')
+  if (trimmed.startsWith('http://')) return 'ws://' + trimmed.slice('http://'.length).replace(/\/+$/, '')
+  if (trimmed.startsWith('https://')) return 'wss://' + trimmed.slice('https://'.length).replace(/\/+$/, '')
+  return trimmed.replace(/\/+$/, '')
+}
+
+function getJobWsUrl(jobId: string): string {
+  const envWsTarget = (import.meta.env.VITE_WS_TARGET as string | undefined) ?? ''
+  const envApiTarget = (import.meta.env.VITE_API_TARGET as string | undefined) ?? ''
+  const base =
+    toWsBaseUrl(envWsTarget) ||
+    toWsBaseUrl(envApiTarget) ||
+    toWsBaseUrl(window.location.origin)
+
+  return `${base}/ws/jobs/${encodeURIComponent(jobId)}`
+}
+
 export function JobsList(props: { refreshToken?: number }) {
   const [jobs, setJobs] = useState<Job[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [open, setOpen] = useState<Record<string, boolean>>({})
+  const jobsRef = useRef<Job[]>([])
+  const socketsRef = useRef<Map<string, WebSocket>>(new Map())
+  const reconnectTimersRef = useRef<Map<string, number>>(new Map())
 
   const toggleOpen = useCallback((id: string) => {
     setOpen((prev) => ({ ...prev, [id]: !prev[id] }))
@@ -145,6 +219,146 @@ export function JobsList(props: { refreshToken?: number }) {
   useEffect(() => {
     void fetchJobs()
   }, [fetchJobs, props.refreshToken])
+
+  useEffect(() => {
+    jobsRef.current = jobs
+  }, [jobs])
+
+  const applyWsUpdate = useCallback(
+    (jobId: string, patch: Partial<Job>) => {
+      setJobs((prev) => {
+        let changed = false
+        const next = prev.map((j) => {
+          if (j.id !== jobId) return j
+          changed = true
+          return { ...j, ...patch }
+        })
+        return changed ? next : prev
+      })
+    },
+    [setJobs],
+  )
+
+  const closeSocket = useCallback((jobId: string) => {
+    const t = reconnectTimersRef.current.get(jobId)
+    if (t != null) {
+      window.clearTimeout(t)
+      reconnectTimersRef.current.delete(jobId)
+    }
+    const ws = socketsRef.current.get(jobId)
+    if (ws) {
+      try {
+        ws.close()
+      } catch {
+        // ignore
+      }
+      socketsRef.current.delete(jobId)
+    }
+  }, [])
+
+  const openSocket = useCallback(
+    (job: Job) => {
+      const jobId = job.id
+      const existingTimer = reconnectTimersRef.current.get(jobId)
+      if (existingTimer != null) {
+        window.clearTimeout(existingTimer)
+        reconnectTimersRef.current.delete(jobId)
+      }
+      if (socketsRef.current.has(jobId)) return
+
+      const wsUrl = getJobWsUrl(jobId)
+      let ws: WebSocket
+      try {
+        ws = new WebSocket(wsUrl)
+      } catch {
+        return
+      }
+
+      socketsRef.current.set(jobId, ws)
+
+      ws.onmessage = (evt) => {
+        try {
+          const msg = JSON.parse(String(evt.data)) as JobWsEvent
+          if (!msg || typeof msg !== 'object' || (msg as any).jobId !== jobId) return
+
+          if (msg.type === 'snapshot') {
+            applyWsUpdate(jobId, {
+              filename: msg.filename ?? job.filename,
+              status: msg.status ?? job.status,
+              totalRows: msg.totalRows ?? null,
+              processedRows: msg.processedRows ?? null,
+              successCount: msg.successCount ?? null,
+              failedCount: msg.failedCount ?? null,
+              createdAt: msg.createdAt ?? job.createdAt ?? null,
+              completedAt: msg.completedAt ?? job.completedAt ?? null,
+            })
+            return
+          }
+
+          if (msg.type === 'progress') {
+            applyWsUpdate(jobId, {
+              totalRows: msg.totalRows ?? null,
+              processedRows: msg.processedRows ?? null,
+              successCount: msg.successCount ?? null,
+              failedCount: msg.failedCount ?? null,
+            })
+            return
+          }
+
+          if (msg.type === 'status') {
+            applyWsUpdate(jobId, {
+              status: msg.status,
+              totalRows: msg.totalRows ?? null,
+              processedRows: msg.processedRows ?? null,
+              successCount: msg.successCount ?? null,
+              failedCount: msg.failedCount ?? null,
+            })
+            const s = normalizeStatus(msg.status)
+            if (s === 'completed' || s === 'failed') {
+              // Pull final data (incl. full error list) once done.
+              void fetchJobs()
+              closeSocket(jobId)
+            }
+            return
+          }
+        } catch {
+        }
+      }
+
+      ws.onclose = () => {
+        socketsRef.current.delete(jobId)
+
+        if (reconnectTimersRef.current.has(jobId)) return
+        const current = jobsRef.current.find((x) => x.id === jobId)
+        if (!current || !jobIsActive(current)) return
+        const t = window.setTimeout(() => {
+          openSocket(current)
+        }, 750)
+        reconnectTimersRef.current.set(jobId, t)
+      }
+    },
+    [applyWsUpdate, closeSocket, fetchJobs],
+  )
+
+  useEffect(() => {
+    const activeIds = new Set(jobs.filter(jobIsActive).map((j) => j.id))
+
+    for (const [jobId] of socketsRef.current.entries()) {
+      if (!activeIds.has(jobId)) closeSocket(jobId)
+    }
+
+
+    for (const j of jobs) {
+      if (!jobIsActive(j)) continue
+      openSocket(j)
+    }
+  }, [jobs, closeSocket, openSocket])
+
+  useEffect(() => {
+    return () => {
+      for (const [jobId] of socketsRef.current.entries()) closeSocket(jobId)
+    }
+  }, [closeSocket])
 
   const rows = useMemo(() => jobs, [jobs])
 
@@ -206,7 +420,6 @@ export function JobsList(props: { refreshToken?: number }) {
               const isDone = status === 'completed' || status === 'failed'
               const badge = statusBadge(job.status)
               const idShort = job.id.length > 8 ? job.id.slice(0, 8) : job.id
-              const firstError = hasErrors ? errors[0] : null
 
               return (
                 <Fragment key={job.id}>

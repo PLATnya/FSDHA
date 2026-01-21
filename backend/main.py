@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 import logging
 
-from routers import job_router, root_router, customer_router
+from routers import job_router, root_router, customer_router, ws_router
 from db_session import init_db, close_db
 from logging_config import setup_logging
 from contextlib import asynccontextmanager
@@ -26,4 +26,5 @@ app = FastAPI(title="File Upload Service", lifespan=lifespan)
 app.include_router(root_router.router)
 app.include_router(job_router.router)
 app.include_router(customer_router.router)
+app.include_router(ws_router.router)
 

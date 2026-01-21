@@ -12,6 +12,7 @@ async def root():
             "GET /api/jobs/{job_id}": "Get job status and progress",
             "GET /api/jobs/id": "Get the last job ID from the queue",
             "DELETE /api/jobs/reset": "Cancel ongoing jobs and delete all job-related data",
-            "GET /api/customers": "List all customers"
+            "GET /api/customers": "List all customers",
+            "WS /ws/jobs/{job_id}": "Subscribe to per-row job progress events"
         }
     }

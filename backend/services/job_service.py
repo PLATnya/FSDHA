@@ -12,6 +12,7 @@ import asyncio
 
 from database import Job, JobError, JobStatus, Customer
 from db_session import AsyncSessionLocal
+from services.job_progress_hub import job_progress_hub
 
 logger = logging.getLogger(__name__)
 
@@ -199,6 +200,15 @@ class JobService:
                 await JobService.update_job_status(
                     db, job_id, JobStatus.PROCESSING
                 )
+                await job_progress_hub.publish(
+                    job_id,
+                    {
+                        "type": "status",
+                        "jobId": job_id,
+                        "status": JobStatus.PROCESSING.value,
+                        "ts": datetime.now().isoformat(),
+                    },
+                )
                 file_path_obj = Path(file_path)
                 if not file_path_obj.exists():
                     raise FileNotFoundError(f"File not found: {file_path}")
@@ -226,6 +236,19 @@ class JobService:
                     success_count=0,
                     failed_count=0
                 )
+                await job_progress_hub.publish(
+                    job_id,
+                    {
+                        "type": "progress",
+                        "jobId": job_id,
+                        "totalRows": total_rows,
+                        "processedRows": 0,
+                        "successCount": 0,
+                        "failedCount": 0,
+                        "progress": 0.0,
+                        "ts": datetime.now().isoformat(),
+                    },
+                )
 
                 with open(file_path_obj, 'r', encoding='utf-8') as csvfile:
                     reader = csv.DictReader(csvfile)
@@ -242,6 +265,22 @@ class JobService:
                                 processed_rows=processed_rows,
                                 success_count=success_count,
                                 failed_count=failed_count
+                            )
+                            await job_progress_hub.publish(
+                                job_id,
+                                {
+                                    "type": "progress",
+                                    "jobId": job_id,
+                                    "rowNumber": row_number,
+                                    "rowOutcome": "failed",
+                                    "error": validation_error,
+                                    "totalRows": total_rows,
+                                    "processedRows": processed_rows,
+                                    "successCount": success_count,
+                                    "failedCount": failed_count,
+                                    "progress": (processed_rows / total_rows) if total_rows else 0.0,
+                                    "ts": datetime.now().isoformat(),
+                                },
                             )
                             continue
                         name = row['name'].strip()
@@ -265,8 +304,38 @@ class JobService:
                             success_count=success_count,
                             failed_count=failed_count
                         )
+                        await job_progress_hub.publish(
+                            job_id,
+                            {
+                                "type": "progress",
+                                "jobId": job_id,
+                                "rowNumber": row_number,
+                                "rowOutcome": "success" if success else "failed",
+                                "error": None if success else insert_error,
+                                "totalRows": total_rows,
+                                "processedRows": processed_rows,
+                                "successCount": success_count,
+                                "failedCount": failed_count,
+                                "progress": (processed_rows / total_rows) if total_rows else 0.0,
+                                "ts": datetime.now().isoformat(),
+                            },
+                        )
                 await JobService.update_job_status(
                     db, job_id, JobStatus.COMPLETED, datetime.now()
+                )
+                await job_progress_hub.publish(
+                    job_id,
+                    {
+                        "type": "status",
+                        "jobId": job_id,
+                        "status": JobStatus.COMPLETED.value,
+                        "totalRows": total_rows,
+                        "processedRows": processed_rows,
+                        "successCount": success_count,
+                        "failedCount": failed_count,
+                        "progress": 1.0 if total_rows else 0.0,
+                        "ts": datetime.now().isoformat(),
+                    },
                 )
                 logger.info(
                     f"File {file_path} processed successfully for job {job_id}. "
@@ -278,6 +347,16 @@ class JobService:
                         db, job_id, JobStatus.FAILED, datetime.now()
                     )
                     await JobService.add_job_error(db, job_id, "Job cancelled")
+                    await job_progress_hub.publish(
+                        job_id,
+                        {
+                            "type": "status",
+                            "jobId": job_id,
+                            "status": JobStatus.FAILED.value,
+                            "message": "Job cancelled",
+                            "ts": datetime.now().isoformat(),
+                        },
+                    )
                 except Exception:
                     await db.rollback()
                 logger.warning(f"Job {job_id} processing cancelled")
@@ -287,6 +366,16 @@ class JobService:
                     db, job_id, JobStatus.FAILED, datetime.now()
                 )
                 await JobService.add_job_error(db, job_id, str(e))
+                await job_progress_hub.publish(
+                    job_id,
+                    {
+                        "type": "status",
+                        "jobId": job_id,
+                        "status": JobStatus.FAILED.value,
+                        "message": str(e),
+                        "ts": datetime.now().isoformat(),
+                    },
+                )
                 logger.error(f"Error processing file for job {job_id}: {e}", exc_info=True)
 
     @staticmethod
