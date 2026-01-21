@@ -1,9 +1,11 @@
 from fastapi import UploadFile, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Dict, Any, List
 import asyncio
 import logging
+import csv
+import io
 
 from services.job_service import JobService
 from services.file_service import FileService
@@ -169,6 +171,41 @@ class JobController:
                 status_code=500,
                 detail=f"Error retrieving job: {str(e)}"
             )
+
+    async def get_job_error_report(
+        self,
+        job_id: str,
+        db: AsyncSession
+    ) -> Response:
+        job = await JobService.get_job_by_id(db, job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+
+        error_rows = await JobService.get_error_rows(db, job_id)
+
+        out = io.StringIO()
+        writer = csv.writer(out)
+        writer.writerow(["rowNumber", "name", "email", "phone", "company", "error"])
+        for r in error_rows:
+            writer.writerow(
+                [
+                    r.rowNumber,
+                    r.name or "",
+                    r.email or "",
+                    r.phone or "",
+                    r.company or "",
+                    JobService._strip_row_prefix(r.error_message) or "",
+                ]
+            )
+        csv_text = out.getvalue()
+        out.close()
+
+        filename = f'job_{job_id}_error_report.csv'
+        return Response(
+            content=csv_text,
+            media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
 
     async def get_last_job_id(
         self,

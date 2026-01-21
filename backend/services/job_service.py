@@ -76,13 +76,37 @@ class JobService:
     async def add_job_error(
         db: AsyncSession,
         job_id: str,
-        error_message: str
+        error_message: str,
+        row_number: Optional[int] = None,
+        row: Optional[Dict[str, str]] = None
     ) -> JobError:
-        error = JobError(job_id=job_id, error_message=error_message)
+        error = JobError(
+            job_id=job_id,
+            error_message=error_message,
+            rowNumber=row_number,
+            name=((row.get("name") or "").strip() or None) if row else None,
+            email=((row.get("email") or "").strip() or None) if row else None,
+            phone=((row.get("phone") or "").strip() or None) if row else None,
+            company=((row.get("company") or "").strip() or None) if row else None,
+        )
         db.add(error)
         await db.commit()
         await db.refresh(error)
         return error
+
+    @staticmethod
+    def _strip_row_prefix(msg: str) -> str:
+        return re.sub(r"^Row\s+\d+:\s*", "", msg or "").strip()
+
+    @staticmethod
+    async def get_error_rows(db: AsyncSession, job_id: str) -> List[JobError]:
+        result = await db.execute(
+            select(JobError)
+            .where(JobError.job_id == job_id)
+            .where(JobError.rowNumber.is_not(None))
+            .order_by(JobError.rowNumber.asc(), JobError.id.asc())
+        )
+        return list(result.scalars().all())
 
     @staticmethod
     async def get_job_errors(db: AsyncSession, job_id: str) -> List[str]:
@@ -258,7 +282,7 @@ class JobService:
                         is_valid, validation_error = JobService.validate_row(row, row_number)
                         if not is_valid:
                             failed_count += 1
-                            await JobService.add_job_error(db, job_id, validation_error)
+                            await JobService.add_job_error(db, job_id, validation_error, row_number=row_number, row=row)
                             await JobService.update_job_counts(
                                 db, job_id,
                                 total_rows=total_rows,
@@ -296,7 +320,7 @@ class JobService:
                         else:
                             failed_count += 1
                             error_msg = f"Row {row_number}: {insert_error}"
-                            await JobService.add_job_error(db, job_id, error_msg)
+                            await JobService.add_job_error(db, job_id, error_msg, row_number=row_number, row=row)
                         await JobService.update_job_counts(
                             db, job_id,
                             total_rows=total_rows,

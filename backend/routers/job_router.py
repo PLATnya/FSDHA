@@ -34,3 +34,7 @@ async def reset_all_data(db: AsyncSession = Depends(get_db)):
 @router.get("/{job_id}")
 async def get_job(job_id: str, db: AsyncSession = Depends(get_db)):
     return await job_controller.get_job(job_id, db)
+
+@router.get("/{job_id}/error-report")
+async def get_job_error_report(job_id: str, db: AsyncSession = Depends(get_db)):
+    return await job_controller.get_job_error_report(job_id, db)

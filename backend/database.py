@@ -33,6 +33,11 @@ class JobError(Base):
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     job_id = Column(String(36), ForeignKey("jobs._id"), nullable=False, index=True)
+    rowNumber = Column(Integer, nullable=True, index=True)
+    name = Column(String(255), nullable=True)
+    email = Column(String(255), nullable=True)
+    phone = Column(String(50), nullable=True)
+    company = Column(String(255), nullable=True)
     error_message = Column(Text, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     job = relationship("Job", back_populates="errors")
