@@ -2,12 +2,14 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import ErrorIcon from '@mui/icons-material/Error'
 import ExpandLessIcon from '@mui/icons-material/ExpandLess'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
+import FileDownloadIcon from '@mui/icons-material/FileDownload'
 import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import SyncIcon from '@mui/icons-material/Sync'
 import {
   Alert,
   Box,
+  Button,
   Chip,
   Collapse,
   IconButton,
@@ -483,6 +485,22 @@ export function JobsList(props: { refreshToken?: number }) {
                             <Typography variant="subtitle2" fontWeight={700}>
                               Details
                             </Typography>
+                            <Stack direction="row" spacing={1} alignItems="center" useFlexGap flexWrap="wrap">
+                              <Button
+                                size="small"
+                                variant="outlined"
+                                startIcon={<FileDownloadIcon />}
+                                component="a"
+                                href={`/api/jobs/${encodeURIComponent(job.id)}/error-report`}
+                                download={`job_${job.id}_error_report.csv`}
+                                disabled={(job.failedCount ?? 0) <= 0}
+                              >
+                                Error report (CSV)
+                              </Button>
+                              <Typography variant="caption" color="text.secondary">
+                                Failed rows: {job.failedCount ?? 0}
+                              </Typography>
+                            </Stack>
                             <Typography variant="body2" color="text.secondary">
                               Rows: {job.processedRows ?? 0}/{job.totalRows ?? 0}
                             </Typography>
