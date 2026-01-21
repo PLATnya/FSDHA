@@ -2,6 +2,7 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import ErrorIcon from '@mui/icons-material/Error'
 import ExpandLessIcon from '@mui/icons-material/ExpandLess'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
+import DeleteIcon from '@mui/icons-material/Delete'
 import FileDownloadIcon from '@mui/icons-material/FileDownload'
 import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty'
 import RefreshIcon from '@mui/icons-material/Refresh'
@@ -218,6 +219,26 @@ export function JobsList(props: { refreshToken?: number }) {
     }
   }, [])
 
+  const clearAll = useCallback(async () => {
+    if (!window.confirm('Are you sure you want to delete all jobs and related data? This action cannot be undone.')) {
+      return
+    }
+    setLoading(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/jobs/reset', { method: 'DELETE' })
+      if (!res.ok) {
+        const text = await res.text().catch(() => '')
+        throw new Error(text || `Failed to clear all data (${res.status})`)
+      }
+      await fetchJobs()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to clear all data')
+    } finally {
+      setLoading(false)
+    }
+  }, [fetchJobs])
+
   useEffect(() => {
     void fetchJobs()
   }, [fetchJobs, props.refreshToken])
@@ -375,13 +396,22 @@ export function JobsList(props: { refreshToken?: number }) {
             Track filename, status, progress, counts, and errors.
           </Typography>
         </Box>
-        <Tooltip title="Refresh">
-          <span>
-            <IconButton onClick={fetchJobs} disabled={loading} aria-label="Refresh jobs">
-              <RefreshIcon />
-            </IconButton>
-          </span>
-        </Tooltip>
+        <Stack direction="row" spacing={1} alignItems="center">
+          <Tooltip title="Clear all jobs">
+            <span>
+              <IconButton onClick={clearAll} disabled={loading || jobs.length === 0} aria-label="Clear all jobs" color="error">
+                <DeleteIcon />
+              </IconButton>
+            </span>
+          </Tooltip>
+          <Tooltip title="Refresh">
+            <span>
+              <IconButton onClick={fetchJobs} disabled={loading} aria-label="Refresh jobs">
+                <RefreshIcon />
+              </IconButton>
+            </span>
+          </Tooltip>
+        </Stack>
       </Stack>
 
       {loading ? <LinearProgress sx={{ mb: 2 }} /> : null}
