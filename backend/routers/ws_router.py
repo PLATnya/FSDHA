@@ -79,10 +79,18 @@ async def job_progress_ws(
     await job_progress_hub.subscribe(validated_job_id, websocket)
 
     try:
+        # Keep connection alive by receiving messages
+        # We don't process the messages, just maintain the connection
         while True:
             await websocket.receive()
     except WebSocketDisconnect:
+        # Normal disconnect - client closed connection
         logger.info(f"WebSocket disconnected for job: {validated_job_id}", extra={"job_id": validated_job_id})
+    except RuntimeError as e:
+        if "disconnect" in str(e).lower() or "receive" in str(e).lower():
+            logger.debug(f"WebSocket receive error (likely already disconnected) for job: {validated_job_id}: {e}", extra={"job_id": validated_job_id})
+        else:
+            raise
     finally:
         await job_progress_hub.unsubscribe(validated_job_id, websocket)
         logger.debug(f"WebSocket unsubscribed for job: {validated_job_id}", extra={"job_id": validated_job_id})
