@@ -162,6 +162,7 @@ class JobController:
     async def reset_all_data(self, db: AsyncSession) -> JSONResponse:
         """
         Cancel all running background tasks and delete all job-related data.
+        Also deletes all files from the upload directory.
         """
         try:
             logger.info("Starting reset all data operation")
@@ -169,13 +170,18 @@ class JobController:
 
             logger.info(f"Cancelled {cancelled} background tasks")
             deleted = await JobService.delete_all_job_data(db)  # Delete jobs in database
+            
+            # Delete all files from upload directory
+            files_deleted = await self.file_service.delete_all_files()
+            logger.info(f"Deleted {files_deleted} files from upload directory")
 
-            logger.info(f"Reset completed: {deleted}")
+            logger.info(f"Reset completed: {deleted}, files_deleted: {files_deleted}")
             return JSONResponse(
                 status_code=200,
                 content={
                     "message": "All job-related data deleted",
                     "cancelled_tasks": cancelled,
+                    "files_deleted": files_deleted,
                     **deleted,
                 }
             )

@@ -43,3 +43,27 @@ class FileService:
         Returns the file path.
         """
         return self.upload_dir / f"{job_id}_{filename}"
+
+    async def delete_all_files(self) -> int:
+        """
+        Delete all files in the upload directory.
+        Returns the number of files deleted.
+        """
+        if not self.upload_dir.exists():
+            logger.debug(f"Upload directory does not exist: {self.upload_dir}")
+            return 0
+
+        deleted_count = 0
+        for file_path in self.upload_dir.iterdir():
+            if file_path.is_file():
+                try:
+                    file_path.unlink()
+                    deleted_count += 1
+                    logger.debug(f"Deleted file: {file_path}")
+                except Exception as e:
+                    logger.warning(f"Failed to delete file {file_path}: {e}")
+                    # Continue deleting other files even if one fails
+
+        logger.info(f"Deleted {deleted_count} files from upload directory: {self.upload_dir}")
+        return deleted_count
+
