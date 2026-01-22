@@ -83,9 +83,6 @@ async def job_progress_ws(
             await websocket.receive()
     except WebSocketDisconnect:
         logger.info(f"WebSocket disconnected for job: {validated_job_id}", extra={"job_id": validated_job_id})
-    except Exception as e:
-        logger.error(f"WebSocket error for job {validated_job_id}: {e}", exc_info=True, extra={"job_id": validated_job_id})
-        raise
     finally:
         await job_progress_hub.unsubscribe(validated_job_id, websocket)
         logger.debug(f"WebSocket unsubscribed for job: {validated_job_id}", extra={"job_id": validated_job_id})

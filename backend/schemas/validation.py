@@ -1,6 +1,8 @@
 from typing import Optional
 import logging
 import uuid
+from fastapi.exceptions import RequestValidationError
+from fastapi import UploadFile
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +23,13 @@ def validate_job_id(job_id: str) -> str:
         logger.debug(f"Invalid job_id format: {job_id}")
         raise ValueError(f"job_id must be a valid UUID format, got: {job_id}")
     return job_id
+
+
+def validate_request_job_id(job_id: str) -> str:
+    try:
+        return validate_job_id(job_id)
+    except ValueError as e:
+        raise RequestValidationError(errors=[{"loc": ["path", "job_id"], "msg": str(e), "type": "value_error"}])
 
 class FileUploadValidation:
 
@@ -84,3 +93,19 @@ class FileUploadValidation:
             raise ValueError(f"File size exceeds maximum allowed size of {max_mb}MB")
         logger.debug(f"File size validation passed: {file_size} bytes")
     
+
+    @classmethod
+    async def validate_file_upload(cls, file: UploadFile) -> tuple[str, int]:
+        try:
+            validated_filename = cls.validate_filename(file.filename)
+            cls.validate_file_extension(validated_filename)
+
+            content = await file.read()
+            file_size = len(content)
+            cls.validate_file_size(file_size)
+
+            await file.seek(0)
+            return validated_filename, file_size
+        except ValueError as e:
+            raise RequestValidationError(errors=[{"loc": ["body", "file"], "msg": str(e), "type": "value_error"}])
+        
