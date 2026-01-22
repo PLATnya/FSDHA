@@ -1,6 +1,7 @@
 
 ## Implemented bonuses
 - **Automatic Progress Updates** via WebSocket
+-- don't work with docker(don't know why. It's some websocket problem)
 - **Downloadable Error Report**
 
 ## Tech Stack
@@ -237,6 +238,8 @@ FSDHA/
 | `VITE_WS_TARGET` | WebSocket URL | (derived from API target) |
 | `VITE_DEV_HOST` | Dev server host | `0.0.0.0` |
 | `VITE_DEV_PORT` | Dev server port | `3000` |
+| `HOST` | Prod server host | `0.0.0.0` |
+| `PORT` | Prod server port | `3000` |
 
 ## Development
 
@@ -280,6 +283,76 @@ pytest
 - Check that `VITE_WS_TARGET` matches your backend WebSocket endpoint
 - Ensure backend WebSocket route is accessible
 
+## Docker Deployment
+
+### Quick Start with Docker Compose
+
+The easiest way to run the entire application is using Docker Compose:
+
+1. **Create `.env` files** for backend and frontend with same variables as described above:
+
+
+2. **Edit the `.env` files** with your configuration:
+
+   **`backend/.env`**:
+   ```env
+   # Additional variable
+   # MySQL Root Password (for MySQL container)
+   MYSQL_ROOT_PASSWORD=your_root_password
+   
+   ```
+
+2. **Build and start all services**:
+   ```bash
+   docker-compose up -d
+   ```
+
+3. **View logs**:
+   ```bash
+   docker-compose logs -f
+   ```
+
+4. **Stop all services**:
+   ```bash
+   docker-compose down
+   ```
+
+5. **Stop and remove volumes** (clears database):
+   ```bash
+   docker-compose down -v
+   ```
+
+### Individual Docker Builds
+
+#### Backend Only
+```bash
+cd backend
+# Edit .env with your configuration
+docker build -t fsdha-backend .
+docker run -p 8000:8000 --env-file .env fsdha-backend
+```
+
+#### Frontend Only
+```bash
+cd frontend
+
+# Edit .env with your configuration
+docker build -t fsdha-frontend .
+docker run -p 3000:3000 --env-file .env fsdha-frontend
+```
+
+### Docker Compose Services
+
+- **mysql**: MySQL 8.0 database (port 3306)
+- **backend**: FastAPI application (port 8000)
+- **frontend**: React application with Vite dev server (port 3000)
+
+All services are connected via a Docker network. Each service reads environment variables from its own `.env` file:
+- `backend/.env` - Backend and MySQL configuration
+- `frontend/.env` - Frontend configuration
+
+The frontend Vite dev server automatically proxies `/api` and `/ws` requests to the backend.
+
 ## Production Deployment
 
 ### Backend
@@ -293,3 +366,10 @@ pytest
 1. Build for production: `npm run build`
 2. Serve the `dist/` directory with a web server (nginx, Apache, etc.)
 3. Configure API proxy or set `VITE_API_TARGET` to production backend URL
+
+### Docker Production
+1. Use Docker Compose with production environment variables
+2. Set up reverse proxy (nginx/traefik) in front of containers
+3. Use Docker secrets for sensitive data
+4. Configure volume mounts for persistent data
+5. Set up health checks and restart policies

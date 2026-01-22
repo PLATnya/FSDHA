@@ -3,6 +3,7 @@ from urllib.parse import quote_plus
 from database import Base
 import os
 import logging
+import asyncio
 from dotenv import load_dotenv
 from exceptions import DatabaseError
 
@@ -40,16 +41,31 @@ AsyncSessionLocal = async_sessionmaker(
 async def init_db():
     """
     Initialize the database tables.
+    Retries connection with exponential backoff if MySQL is not ready.
 
     Returns:
         None
     """
-    try:
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-        logger.info(f"Database tables initialized successfully for database: {MYSQL_DATABASE}")
-    except Exception as e:
-        raise DatabaseError(f"Failed to initialize database: {str(e)}")
+    max_retries = 10
+    retry_delay = 2  # seconds
+    
+    for attempt in range(max_retries):
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+            logger.info(f"Database tables initialized successfully for database: {MYSQL_DATABASE}")
+            return
+        except Exception as e:
+            if attempt < max_retries - 1:
+                wait_time = retry_delay * (2 ** attempt)
+                logger.warning(
+                    f"Failed to connect to database (attempt {attempt + 1}/{max_retries}): {str(e)}. "
+                    f"Retrying in {wait_time} seconds..."
+                )
+                await asyncio.sleep(wait_time)
+            else:
+                logger.error(f"Failed to connect to database after {max_retries} attempts: {str(e)}")
+                raise DatabaseError(f"Failed to initialize database after {max_retries} attempts: {str(e)}")
 
 
 
