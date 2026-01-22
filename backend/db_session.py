@@ -1,12 +1,13 @@
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
-from sqlalchemy.pool import QueuePool
 from urllib.parse import quote_plus
 from database import Base
 import os
 import logging
 from dotenv import load_dotenv
+from exceptions import DatabaseError
 
 logger = logging.getLogger(__name__)
+
 load_dotenv()
 MYSQL_USER = os.getenv("MYSQL_USER", "root")
 MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD", "")
@@ -37,33 +38,51 @@ AsyncSessionLocal = async_sessionmaker(
 
 
 async def init_db():
+    """
+    Initialize the database tables.
+
+    Returns:
+        None
+    """
     try:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         logger.info(f"Database tables initialized successfully for database: {MYSQL_DATABASE}")
     except Exception as e:
-        logger.error(f"Failed to initialize database: {e}")
-        raise
+        raise DatabaseError(f"Failed to initialize database: {str(e)}")
+
 
 
 async def close_db():
+    """
+    Close the database connection pool.
+
+    Returns:
+        None
+    """
     try:
         await engine.dispose()
         logger.info("Database connection pool closed")
     except Exception as e:
-        logger.error(f"Error closing database connection: {e}")
+        raise DatabaseError(f"Failed to close database connection: {str(e)}")
 
 
 async def get_db() -> AsyncSession:
+    """
+    Get a database session.
+
+    Returns:
+        AsyncSession: A database session.
+    """
     async with AsyncSessionLocal() as session:
         try:
             yield session
             await session.commit()
             logger.debug("Database session committed successfully")
         except Exception as e:
-            logger.warning(f"Database session error, rolling back: {e}")
+            logger.warning(f"Database session error, rolling back: {str(e)}")
             await session.rollback()
-            raise
+            raise DatabaseError(f"Database session error: {str(e)}")
         finally:
             await session.close()
             logger.debug("Database session closed")

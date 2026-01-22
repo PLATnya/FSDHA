@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Get logging level from environment variable, default to INFO
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 LOG_DIR = Path(__file__).parent / "logs"
 LOG_DIR.mkdir(exist_ok=True)
@@ -14,6 +15,13 @@ LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 def setup_logging():
+    """
+    Setup logging configuration for the application.
+    
+    Sets up logging to console and file (app.log and error.log).
+    Configures logging levels and formats.
+    Removes existing handlers to prevent duplicates.
+    """
     numeric_level = getattr(logging, LOG_LEVEL, logging.INFO)
     
     root_logger = logging.getLogger()
@@ -32,7 +40,7 @@ def setup_logging():
     file_handler = RotatingFileHandler(
         LOG_DIR / "app.log",
         maxBytes=10 * 1024 * 1024,
-        backupCount=5
+        backupCount=2
     )
     file_handler.setLevel(numeric_level)
     file_handler.setFormatter(formatter)
@@ -41,7 +49,7 @@ def setup_logging():
     error_file_handler = RotatingFileHandler(
         LOG_DIR / "error.log",
         maxBytes=10 * 1024 * 1024,
-        backupCount=5
+        backupCount=2
     )
     error_file_handler.setLevel(logging.ERROR)
     error_file_handler.setFormatter(formatter)
