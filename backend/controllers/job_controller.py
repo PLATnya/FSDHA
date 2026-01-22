@@ -62,16 +62,20 @@ class JobController:
         db: AsyncSession
     ) -> JSONResponse:
         if not file.filename:
+            logger.warning("File upload attempted without filename")
             raise FileUploadError("Filename is required")
         try:
+            logger.debug(f"Creating job for file: {file.filename}")
             job = await JobService.create_job(
                 db=db,
                 filename=file.filename
             )
+            logger.debug(f"Job created: {job._id}, saving file")
             file_path = await self.file_service.save_uploaded_file(
                 file=file,
                 job_id=job._id
             )
+            logger.debug(f"File saved to: {file_path}")
             
             async def runner():
                 try:
@@ -97,6 +101,7 @@ class JobController:
         except HTTPException:
             raise
         except Exception as e:
+            logger.error(f"Failed to upload file {file.filename}: {e}", exc_info=True)
             await db.rollback()
             raise FileUploadError(f"Failed to upload file: {str(e)}")
 
@@ -105,8 +110,10 @@ class JobController:
         db: AsyncSession
     ) -> JSONResponse:
         try:
+            logger.debug("Fetching all jobs from database")
             jobs = await JobService.get_all_jobs(db)
             job_ids = [job._id for job in jobs]
+            logger.debug(f"Found {len(job_ids)} jobs, fetching errors")
             all_errors = await JobService.get_job_errors_batch(db, job_ids)
             jobs_list = [
                 self._serialize_job(job, all_errors.get(job._id, []))
@@ -121,12 +128,16 @@ class JobController:
                 }
             )
         except Exception as e:
+            logger.error(f"Failed to retrieve jobs: {e}", exc_info=True)
             raise DatabaseError(f"Failed to retrieve jobs: {str(e)}")
 
     async def reset_all_data(self, db: AsyncSession) -> JSONResponse:
         try:
+            logger.info("Starting reset all data operation")
             cancelled = await self._cancel_all_tasks()
+            logger.info(f"Cancelled {cancelled} background tasks")
             deleted = await JobService.delete_all_job_data(db)
+            logger.info(f"Reset completed: {deleted}")
             return JSONResponse(
                 status_code=200,
                 content={
@@ -136,6 +147,7 @@ class JobController:
                 }
             )
         except Exception as e:
+            logger.error(f"Failed to reset all data: {e}", exc_info=True)
             raise DatabaseError(f"Failed to reset all data: {str(e)}")
 
     async def get_job(
@@ -144,10 +156,13 @@ class JobController:
         db: AsyncSession
     ) -> JSONResponse:
         try:
+            logger.debug(f"Fetching job: {job_id}")
             job = await JobService.get_job_by_id(db, job_id)
             if not job:
+                logger.warning(f"Job not found: {job_id}")
                 raise JobNotFoundError(job_id)
             error_messages = await JobService.get_job_errors(db, job._id)
+            logger.debug(f"Retrieved job {job_id} with {len(error_messages)} errors")
             return JSONResponse(
                 status_code=200,
                 content=self._serialize_job(job, error_messages)
@@ -155,6 +170,7 @@ class JobController:
         except HTTPException:
             raise
         except Exception as e:
+            logger.error(f"Failed to retrieve job {job_id}: {e}", exc_info=True)
             raise DatabaseError(f"Failed to retrieve job: {str(e)}")
 
     async def get_job_error_report(
@@ -162,11 +178,14 @@ class JobController:
         job_id: str,
         db: AsyncSession
     ) -> Response:
+        logger.debug(f"Generating error report for job: {job_id}")
         job = await JobService.get_job_by_id(db, job_id)
         if not job:
+            logger.warning(f"Job not found for error report: {job_id}")
             raise JobNotFoundError(job_id)
 
         error_rows = await JobService.get_error_rows(db, job_id)
+        logger.debug(f"Found {len(error_rows)} error rows for job {job_id}")
 
         out = io.StringIO()
         writer = csv.writer(out)
@@ -186,6 +205,7 @@ class JobController:
         out.close()
 
         filename = f'job_{job_id}_error_report.csv'
+        logger.info(f"Generated error report for job {job_id}: {len(error_rows)} rows")
         return Response(
             content=csv_text,
             media_type="text/csv",
@@ -197,8 +217,10 @@ class JobController:
         db: AsyncSession
     ) -> JSONResponse:
         try:
+            logger.debug("Fetching last job ID")
             last_job = await JobService.get_last_job(db)
             if not last_job:
+                logger.debug("No jobs found in queue")
                 return JSONResponse(
                     status_code=200,
                     content={
@@ -208,9 +230,11 @@ class JobController:
                     }
                 )
             error_messages = await JobService.get_job_errors(db, last_job._id)
+            logger.debug(f"Retrieved last job: {last_job._id}")
             return JSONResponse(
                 status_code=200,
                 content=self._serialize_job(last_job, error_messages)
             )
         except Exception as e:
+            logger.error(f"Failed to retrieve last job ID: {e}", exc_info=True)
             raise DatabaseError(f"Failed to retrieve last job ID: {str(e)}")

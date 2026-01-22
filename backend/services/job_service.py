@@ -24,6 +24,7 @@ class JobService:
         filename: str
     ) -> Job:
         job_id = str(uuid.uuid4())
+        logger.debug(f"Creating new job: {job_id} for file: {filename}")
         job = Job(
             _id=job_id,
             filename=filename,
@@ -36,6 +37,7 @@ class JobService:
         db.add(job)
         await db.commit()
         await db.refresh(job)
+        logger.info(f"Job created successfully: {job_id} for file: {filename}")
         return job
 
     @staticmethod
@@ -64,13 +66,16 @@ class JobService:
         status: JobStatus,
         completed_at: Optional[datetime] = None
     ) -> bool:
+        logger.debug(f"Updating job {job_id} status to: {status.value}")
         job = await JobService.get_job_by_id(db, job_id)
         if job:
             job.status = status
             if completed_at:
                 job.completedAt = completed_at
             await db.commit()
+            logger.debug(f"Job {job_id} status updated to: {status.value}")
             return True
+        logger.warning(f"Job {job_id} not found, cannot update status")
         return False
 
     @staticmethod
@@ -195,6 +200,7 @@ class JobService:
     ) -> Tuple[bool, Optional[str]]:
         try:
             customer_id = str(uuid.uuid4())
+            logger.debug(f"Inserting customer {customer_id} for job {job_id}: {email}")
             customer = Customer(
                 _id=customer_id,
                 name=name,
@@ -206,15 +212,19 @@ class JobService:
             db.add(customer)
             await db.commit()
             await db.refresh(customer)
+            logger.debug(f"Customer {customer_id} inserted successfully for job {job_id}")
             return True, None
         except IntegrityError as e:
             await db.rollback()
             error_str = str(e).lower()
             if "email" in error_str or "duplicate" in error_str or "unique" in error_str:
+                logger.debug(f"Duplicate email detected for job {job_id}: {email}")
                 return False, f"email '{email}' must be unique in the database (duplicate found)"
+            logger.warning(f"Database integrity error inserting customer for job {job_id}: {e}")
             return False, f"Database integrity error: {str(e)}"
         except Exception as e:
             await db.rollback()
+            logger.error(f"Error inserting customer for job {job_id}: {e}", exc_info=True)
             return False, f"Error inserting customer: {str(e)}"
 
     @staticmethod
@@ -405,17 +415,19 @@ class JobService:
 
     @staticmethod
     async def delete_all_job_data(db: AsyncSession) -> Dict[str, int]:
-
+        logger.info("Deleting all job-related data from database")
         customers_res = await db.execute(delete(Customer))
         errors_res = await db.execute(delete(JobError))
         jobs_res = await db.execute(delete(Job))
         await db.commit()
 
-        def rc(res) -> int:
+        def row_count(res) -> int:
             return int(res.rowcount) if res.rowcount is not None else -1
 
-        return {
-            "customers_deleted": rc(customers_res),
-            "job_errors_deleted": rc(errors_res),
-            "jobs_deleted": rc(jobs_res),
+        deleted_counts = {
+            "customers_deleted": row_count(customers_res),
+            "job_errors_deleted": row_count(errors_res),
+            "jobs_deleted": row_count(jobs_res),
         }
+        logger.info(f"Deleted all job data: {deleted_counts}")
+        return deleted_counts

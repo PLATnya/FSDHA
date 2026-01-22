@@ -28,6 +28,7 @@ class CustomerController:
         db: AsyncSession
     ) -> JSONResponse:
         try:
+            logger.debug("Fetching all customers from database")
             customers = await CustomerService.get_all_customers(db)
             customers_list = [
                 self._serialize_customer(customer)
@@ -42,4 +43,5 @@ class CustomerController:
                 }
             )
         except Exception as e:
+            logger.error(f"Failed to retrieve customers: {e}", exc_info=True)
             raise DatabaseError(f"Failed to retrieve customers: {str(e)}")

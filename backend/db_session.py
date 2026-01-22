@@ -59,8 +59,11 @@ async def get_db() -> AsyncSession:
         try:
             yield session
             await session.commit()
-        except Exception:
+            logger.debug("Database session committed successfully")
+        except Exception as e:
+            logger.warning(f"Database session error, rolling back: {e}")
             await session.rollback()
             raise
         finally:
             await session.close()
+            logger.debug("Database session closed")
