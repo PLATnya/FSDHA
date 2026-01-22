@@ -33,7 +33,7 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException) 
     if exc.status_code >= 500:
         logger.error(
             f"HTTP {exc.status_code} error on {request.method} {request.url.path}: {exc.detail}",
-            exc_info=False,
+            exc_info=True,
             extra={
                 "status_code": exc.status_code,
                 "path": request.url.path,

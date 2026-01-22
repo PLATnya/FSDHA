@@ -13,6 +13,10 @@ logger = logging.getLogger(__name__)
 
 class CustomerController:
     def _serialize_customer(self, customer: Customer) -> Dict[str, Any]:
+        """
+        Serialize a Customer ORM object into a dictionary suitable for JSON output.
+        Converts datetime to ISO-8601 if present.
+        """
         return {
             "id": customer._id,
             "name": customer.name,
@@ -27,6 +31,11 @@ class CustomerController:
         self,
         db: AsyncSession
     ) -> JSONResponse:
+        """
+        Fetch all customers from the database and return them as a JSON response.
+        Returns total number of customers and customer data list.
+        Throws DatabaseError on failure.
+        """
         try:
             logger.debug("Fetching all customers from database")
             customers = await CustomerService.get_all_customers(db)
@@ -43,5 +52,4 @@ class CustomerController:
                 }
             )
         except Exception as e:
-            logger.error(f"Failed to retrieve customers: {e}", exc_info=True)
             raise DatabaseError(f"Failed to retrieve customers: {str(e)}")

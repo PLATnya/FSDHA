@@ -1,6 +1,6 @@
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
-from fastapi.exceptions import validate_request_job_id
+from schemas.validation import validate_request_job_id
 from pathlib import Path
 import logging
 
@@ -34,7 +34,7 @@ async def upload_file(
     db: AsyncSession = Depends(get_db)
 ):
     request_id = get_request_id(request)
-    logger.info(f"File upload request: {file.filename}", extra={"request_id": request_id, "filename": file.filename})
+    logger.info(f"File upload request: {file.filename}", extra={"request_id": request_id})
     
     validated_filename, file_size = await FileUploadValidation.validate_file_upload(file)
     logger.debug(f"File validation passed: {validated_filename}, size: {file_size} bytes", extra={"request_id": request_id})
