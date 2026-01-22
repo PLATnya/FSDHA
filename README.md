@@ -1,7 +1,9 @@
 
 ## Implemented bonuses
 - **Automatic Progress Updates** via WebSocket
--- don't work with docker(don't know why. It's some websocket problem)
+- - don't work with docker and frontend production preview mode
+don't know why. It's some websocket problem
+have no time for test task left to deal with it)
 - **Downloadable Error Report**
 
 ## Tech Stack
