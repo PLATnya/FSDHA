@@ -57,13 +57,10 @@ export function JobsList(props: { refreshToken?: number; newJobId?: string | nul
       }
       const job = (await res.json()) as Job
       setJobs((prev) => {
-        // Check if job already exists in the list
         const exists = prev.some((j) => j.id === job.id)
         if (exists) {
-          // Update existing job
           return prev.map((j) => (j.id === job.id ? job : j))
         }
-        // Add new job at the beginning of the list
         return [job, ...prev]
       })
     } catch (e) {
