@@ -101,7 +101,7 @@ class JobService:
         return error
 
     @staticmethod
-    def _strip_row_prefix(msg: str) -> str:
+    def strip_row_prefix(msg: str) -> str:
         return re.sub(r"^Row\s+\d+:\s*", "", msg or "").strip()
 
     @staticmethod
@@ -198,18 +198,29 @@ class JobService:
         phone: Optional[str],
         company: str
     ) -> Tuple[bool, Optional[str]]:
+        """
+        Insert a customer into the database.
+        
+        Returns:
+            Tuple[bool, Optional[str]]: (success, error_message)
+            - (True, None) on success
+            - (False, error_message) on duplicate email (business logic, not an error)
+        
+        Raises:
+            Exception: For database errors other than duplicate email (caller should handle)
+        """
+        customer_id = str(uuid.uuid4())
+        logger.debug(f"Inserting customer {customer_id} for job {job_id}: {email}")
+        customer = Customer(
+            _id=customer_id,
+            name=name,
+            email=email,
+            phone=phone,
+            company=company,
+            jobId=job_id
+        )
+        db.add(customer)
         try:
-            customer_id = str(uuid.uuid4())
-            logger.debug(f"Inserting customer {customer_id} for job {job_id}: {email}")
-            customer = Customer(
-                _id=customer_id,
-                name=name,
-                email=email,
-                phone=phone,
-                company=company,
-                jobId=job_id
-            )
-            db.add(customer)
             await db.commit()
             await db.refresh(customer)
             logger.debug(f"Customer {customer_id} inserted successfully for job {job_id}")
@@ -220,118 +231,86 @@ class JobService:
             if "email" in error_str or "duplicate" in error_str or "unique" in error_str:
                 logger.debug(f"Duplicate email detected for job {job_id}: {email}")
                 return False, f"email '{email}' must be unique in the database (duplicate found)"
-            logger.warning(f"Database integrity error inserting customer for job {job_id}: {e}")
-            return False, f"Database integrity error: {str(e)}"
-        except Exception as e:
-            await db.rollback()
-            logger.error(f"Error inserting customer for job {job_id}: {e}", exc_info=True)
-            return False, f"Error inserting customer: {str(e)}"
+            # Re-raise if it's a different integrity error
+            raise
 
     @staticmethod
     async def process_job_async(file_path: str, job_id: str):
+        """
+        Process a CSV file asynchronously for a job.
+        
+        This method processes the file row by row, validates data, inserts customers,
+        and publishes progress updates via WebSocket.
+        
+        Raises:
+            FileUploadError: If file is not found
+            JobValidationError: If CSV is missing required columns
+            Exception: For other processing errors (caller should handle)
+        """
         async with AsyncSessionLocal() as db:
-            try:
-                logger.info(f"Starting file processing for job {job_id}, file: {file_path}")
-                await JobService.update_job_status(
-                    db, job_id, JobStatus.PROCESSING
-                )
-                await job_progress_hub.publish(
-                    job_id,
-                    {
-                        "type": "status",
-                        "jobId": job_id,
-                        "status": JobStatus.PROCESSING.value,
-                        "ts": datetime.now().isoformat(),
-                    },
-                )
-                file_path_obj = Path(file_path)
-                if not file_path_obj.exists():
-                    raise FileUploadError(f"File not found: {file_path}")
-                logger.debug(f"File found: {file_path}, starting CSV parsing")
-                processed_rows = 0
-                success_count = 0
-                failed_count = 0
+            logger.info(f"Starting file processing for job {job_id}, file: {file_path}")
+            await JobService.update_job_status(
+                db, job_id, JobStatus.PROCESSING
+            )
+            await job_progress_hub.publish(
+                job_id,
+                {
+                    "type": "status",
+                    "jobId": job_id,
+                    "status": JobStatus.PROCESSING.value,
+                    "ts": datetime.now().isoformat(),
+                },
+            )
+            file_path_obj = Path(file_path)
+            if not file_path_obj.exists():
+                raise FileUploadError(f"File not found: {file_path}")
+            logger.debug(f"File found: {file_path}, starting CSV parsing")
+            processed_rows = 0
+            success_count = 0
+            failed_count = 0
 
-                total_rows = 0
-                required_columns = {'name', 'email', 'phone', 'company'}
-                with open(file_path_obj, 'r', encoding='utf-8') as csvfile:
-                    reader = csv.DictReader(csvfile)
-                    if not required_columns.issubset(set(reader.fieldnames or [])):
-                        missing = required_columns - set(reader.fieldnames or [])
-                        error_msg = f"CSV file is missing required columns: {', '.join(missing)}"
-                        logger.error(f"Job {job_id}: {error_msg}")
-                        raise JobValidationError(f"CSV file is missing required columns: {', '.join(missing)}")
-                    for _ in reader:
-                        total_rows += 1
+            total_rows = 0
+            required_columns = {'name', 'email', 'phone', 'company'}
+            with open(file_path_obj, 'r', encoding='utf-8') as csvfile:
+                reader = csv.DictReader(csvfile)
+                if not required_columns.issubset(set(reader.fieldnames or [])):
+                    missing = required_columns - set(reader.fieldnames or [])
+                    error_msg = f"CSV file is missing required columns: {', '.join(missing)}"
+                    logger.error(f"Job {job_id}: {error_msg}")
+                    raise JobValidationError(f"CSV file is missing required columns: {', '.join(missing)}")
+                for _ in reader:
+                    total_rows += 1
 
-                await JobService.update_job_counts(
-                    db, job_id,
-                    total_rows=total_rows,
-                    processed_rows=0,
-                    success_count=0,
-                    failed_count=0
-                )
-                await job_progress_hub.publish(
-                    job_id,
-                    {
-                        "type": "progress",
-                        "jobId": job_id,
-                        "totalRows": total_rows,
-                        "processedRows": 0,
-                        "successCount": 0,
-                        "failedCount": 0,
-                        "progress": 0.0,
-                        "ts": datetime.now().isoformat(),
-                    },
-                )
+            await JobService.update_job_counts(
+                db, job_id,
+                total_rows=total_rows,
+                processed_rows=0,
+                success_count=0,
+                failed_count=0
+            )
+            await job_progress_hub.publish(
+                job_id,
+                {
+                    "type": "progress",
+                    "jobId": job_id,
+                    "totalRows": total_rows,
+                    "processedRows": 0,
+                    "successCount": 0,
+                    "failedCount": 0,
+                    "progress": 0.0,
+                    "ts": datetime.now().isoformat(),
+                },
+            )
 
-                with open(file_path_obj, 'r', encoding='utf-8') as csvfile:
-                    reader = csv.DictReader(csvfile)
-                    logger.debug(f"CSV columns validated: {reader.fieldnames}")
-                    for row_number, row in enumerate(reader, start=2):
-                        processed_rows += 1
-                        is_valid, validation_error = JobService.validate_row(row, row_number)
-                        if not is_valid:
-                            failed_count += 1
-                            await JobService.add_job_error(db, job_id, validation_error, row_number=row_number, row=row)
-                            await JobService.update_job_counts(
-                                db, job_id,
-                                total_rows=total_rows,
-                                processed_rows=processed_rows,
-                                success_count=success_count,
-                                failed_count=failed_count
-                            )
-                            await job_progress_hub.publish(
-                                job_id,
-                                {
-                                    "type": "progress",
-                                    "jobId": job_id,
-                                    "rowNumber": row_number,
-                                    "rowOutcome": "failed",
-                                    "error": validation_error,
-                                    "totalRows": total_rows,
-                                    "processedRows": processed_rows,
-                                    "successCount": success_count,
-                                    "failedCount": failed_count,
-                                    "progress": (processed_rows / total_rows) if total_rows else 0.0,
-                                    "ts": datetime.now().isoformat(),
-                                },
-                            )
-                            continue
-                        name = row['name'].strip()
-                        email = row['email'].strip()
-                        phone_raw = row.get('phone', '').strip() if row.get('phone') else ''
-                        phone = phone_raw if phone_raw else None
-                        company = row['company'].strip()
-                        success, insert_error = await JobService.insert_customer(
-                            db, job_id, name, email, phone, company
-                        )
-                        if success:
-                            success_count += 1
-                        else:
-                            failed_count += 1
-                            error_msg = f"Row {row_number}: {insert_error}"
-                            await JobService.add_job_error(db, job_id, error_msg, row_number=row_number, row=row)
+            with open(file_path_obj, 'r', encoding='utf-8') as csvfile:
+                reader = csv.DictReader(csvfile)
+                logger.debug(f"CSV columns validated: {reader.fieldnames}")
+                for row_number, row in enumerate(reader, start=2):
+                    processed_rows += 1
+                    is_valid, validation_error = JobService.validate_row(row, row_number)
+                    if not is_valid:
+                        failed_count += 1
+                        await JobService.add_job_error(db, job_id, validation_error, row_number=row_number, row=row)
                         await JobService.update_job_counts(
                             db, job_id,
                             total_rows=total_rows,
@@ -345,8 +324,8 @@ class JobService:
                                 "type": "progress",
                                 "jobId": job_id,
                                 "rowNumber": row_number,
-                                "rowOutcome": "success" if success else "failed",
-                                "error": None if success else insert_error,
+                                "rowOutcome": "failed",
+                                "error": validation_error,
                                 "totalRows": total_rows,
                                 "processedRows": processed_rows,
                                 "successCount": success_count,
@@ -355,63 +334,65 @@ class JobService:
                                 "ts": datetime.now().isoformat(),
                             },
                         )
-                await JobService.update_job_status(
-                    db, job_id, JobStatus.COMPLETED, datetime.now()
-                )
-                await job_progress_hub.publish(
-                    job_id,
-                    {
-                        "type": "status",
-                        "jobId": job_id,
-                        "status": JobStatus.COMPLETED.value,
-                        "totalRows": total_rows,
-                        "processedRows": processed_rows,
-                        "successCount": success_count,
-                        "failedCount": failed_count,
-                        "progress": 1.0 if total_rows else 0.0,
-                        "ts": datetime.now().isoformat(),
-                    },
-                )
-                logger.info(
-                    f"File {file_path} processed successfully for job {job_id}. "
-                    f"Total: {total_rows}, Success: {success_count}, Failed: {failed_count}"
-                )
-            except asyncio.CancelledError:
-                try:
-                    await JobService.update_job_status(
-                        db, job_id, JobStatus.FAILED, datetime.now()
+                        continue
+                    name = row['name'].strip()
+                    email = row['email'].strip()
+                    phone_raw = row.get('phone', '').strip() if row.get('phone') else ''
+                    phone = phone_raw if phone_raw else None
+                    company = row['company'].strip()
+                    success, insert_error = await JobService.insert_customer(
+                        db, job_id, name, email, phone, company
                     )
-                    await JobService.add_job_error(db, job_id, "Job cancelled")
+                    if success:
+                        success_count += 1
+                    else:
+                        failed_count += 1
+                        error_msg = f"Row {row_number}: {insert_error}"
+                        await JobService.add_job_error(db, job_id, error_msg, row_number=row_number, row=row)
+                    await JobService.update_job_counts(
+                        db, job_id,
+                        total_rows=total_rows,
+                        processed_rows=processed_rows,
+                        success_count=success_count,
+                        failed_count=failed_count
+                    )
                     await job_progress_hub.publish(
                         job_id,
                         {
-                            "type": "status",
+                            "type": "progress",
                             "jobId": job_id,
-                            "status": JobStatus.FAILED.value,
-                            "message": "Job cancelled",
+                            "rowNumber": row_number,
+                            "rowOutcome": "success" if success else "failed",
+                            "error": None if success else insert_error,
+                            "totalRows": total_rows,
+                            "processedRows": processed_rows,
+                            "successCount": success_count,
+                            "failedCount": failed_count,
+                            "progress": (processed_rows / total_rows) if total_rows else 0.0,
                             "ts": datetime.now().isoformat(),
                         },
                     )
-                except Exception:
-                    await db.rollback()
-                logger.warning(f"Job {job_id} processing cancelled")
-                raise
-            except Exception as e:
-                await JobService.update_job_status(
-                    db, job_id, JobStatus.FAILED, datetime.now()
-                )
-                await JobService.add_job_error(db, job_id, str(e))
-                await job_progress_hub.publish(
-                    job_id,
-                    {
-                        "type": "status",
-                        "jobId": job_id,
-                        "status": JobStatus.FAILED.value,
-                        "message": str(e),
-                        "ts": datetime.now().isoformat(),
-                    },
-                )
-                logger.error(f"Error processing file for job {job_id}: {e}", exc_info=True)
+            await JobService.update_job_status(
+                db, job_id, JobStatus.COMPLETED, datetime.now()
+            )
+            await job_progress_hub.publish(
+                job_id,
+                {
+                    "type": "status",
+                    "jobId": job_id,
+                    "status": JobStatus.COMPLETED.value,
+                    "totalRows": total_rows,
+                    "processedRows": processed_rows,
+                    "successCount": success_count,
+                    "failedCount": failed_count,
+                    "progress": 1.0 if total_rows else 0.0,
+                    "ts": datetime.now().isoformat(),
+                },
+            )
+            logger.info(
+                f"File {file_path} processed successfully for job {job_id}. "
+                f"Total: {total_rows}, Success: {success_count}, Failed: {failed_count}"
+            )
 
     @staticmethod
     async def delete_all_job_data(db: AsyncSession) -> Dict[str, int]:

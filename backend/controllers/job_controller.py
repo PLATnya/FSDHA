@@ -2,6 +2,7 @@ from fastapi import UploadFile, HTTPException
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Dict, Any, List
+from datetime import datetime
 import asyncio
 import logging
 import csv
@@ -9,7 +10,9 @@ import io
 
 from services.job_service import JobService
 from services.file_service import FileService
-from database import Job, JobError
+from services.job_progress_hub import job_progress_hub
+from database import Job, JobError, JobStatus
+from db_session import AsyncSessionLocal
 from exceptions import JobNotFoundError, FileUploadError, DatabaseError
 
 logger = logging.getLogger(__name__)
@@ -105,9 +108,47 @@ class JobController:
                     await JobService.process_job_async(str(file_path), job._id)
                 except asyncio.CancelledError:
                     logger.info(f"Background task cancelled for job {job._id}")
+                    # Update job status to failed on cancellation
+                    async with AsyncSessionLocal() as db:
+                        try:
+                            await JobService.update_job_status(
+                                db, job._id, JobStatus.FAILED, datetime.now()
+                            )
+                            await JobService.add_job_error(db, job._id, "Job cancelled")
+                            await job_progress_hub.publish(
+                                job._id,
+                                {
+                                    "type": "status",
+                                    "jobId": job._id,
+                                    "status": JobStatus.FAILED.value,
+                                    "message": "Job cancelled",
+                                    "ts": datetime.now().isoformat(),
+                                },
+                            )
+                        except Exception:
+                            await db.rollback()
                     raise
                 except Exception as e:
                     logger.error(f"Unhandled error in background task for job {job._id}: {e}", exc_info=True)
+                    # Update job status to failed on error
+                    async with AsyncSessionLocal() as db:
+                        try:
+                            await JobService.update_job_status(
+                                db, job._id, JobStatus.FAILED, datetime.now()
+                            )
+                            await JobService.add_job_error(db, job._id, str(e))
+                            await job_progress_hub.publish(
+                                job._id,
+                                {
+                                    "type": "status",
+                                    "jobId": job._id,
+                                    "status": JobStatus.FAILED.value,
+                                    "message": str(e),
+                                    "ts": datetime.now().isoformat(),
+                                },
+                            )
+                        except Exception:
+                            await db.rollback()
 
             task = asyncio.create_task(runner(), name=f"process_job:{job._id}")
             self._register_task(job._id, task)
@@ -230,7 +271,7 @@ class JobController:
                         r.email or "",
                         r.phone or "",
                         r.company or "",
-                        JobService._strip_row_prefix(r.error_message) or "",
+                        JobService.strip_row_prefix(r.error_message) or "",
                     ]
                 )
             return out.getvalue()
