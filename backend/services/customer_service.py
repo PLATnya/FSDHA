@@ -11,6 +11,11 @@ logger = logging.getLogger(__name__)
 class CustomerService:
     @staticmethod
     async def get_all_customers(db: AsyncSession) -> List[Customer]:
+        """
+        Fetch all customers from the database and return them as a list of Customer objects.
+        Returns list of Customer objects.
+        Throws DatabaseError on failure.
+        """
         logger.debug("Querying database for all customers")
         result = await db.execute(
             select(Customer).order_by(desc(Customer.createdAt))
