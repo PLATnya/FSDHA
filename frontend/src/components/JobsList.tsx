@@ -339,7 +339,10 @@ export function JobsList(props: { refreshToken?: number }) {
             const s = normalizeStatus(msg.status)
             if (s === 'completed' || s === 'failed') {
               // Pull final data (incl. full error list) once done.
-              void fetchJobs()
+              // Add a small delay to ensure backend has finished committing all errors
+              setTimeout(() => {
+                void fetchJobs()
+              }, 500)
               closeSocket(jobId)
             }
             return
