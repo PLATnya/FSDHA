@@ -19,7 +19,7 @@ function App() {
   const [isUploading, setIsUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<{ id: string; filename: string; status: string } | null>(null)
-  const [jobsRefreshToken, setJobsRefreshToken] = useState(0)
+  const [newJobId, setNewJobId] = useState<string | null>(null)
 
   const fileLabel = useMemo(() => {
     if (!file) return 'No file selected'
@@ -48,7 +48,7 @@ function App() {
 
       const json = (await res.json()) as { id: string; filename: string; status: string }
       setResult(json)
-      setJobsRefreshToken((x) => x + 1)
+      setNewJobId(json.id)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Upload failed')
     } finally {
@@ -126,7 +126,7 @@ function App() {
             </Stack>
           </Paper>
 
-          <JobsList refreshToken={jobsRefreshToken} />
+          <JobsList refreshToken={0} newJobId={newJobId} />
         </Stack>
       </Container>
     </Box>
